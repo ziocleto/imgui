@@ -154,6 +154,10 @@ if (_OPTIONS["with-glfw"]) then
 		filter { "system:windows" }
 			ignoredefaultlibraries { "msvcrt" }
 			links { "opengl32", "glfw3" }
+		filter { "system:macosx" }
+			libdirs { "/usr/local/lib" }
+			links { "glfw" }
+			linkoptions { "-framework OpenGL" }
 end
 
 -- opengl3_example (GLFW + OpenGL3)
@@ -172,6 +176,10 @@ if (_OPTIONS["with-glfw"]) then
 		filter { "system:windows" }
 			ignoredefaultlibraries { "msvcrt" }
 			links { "opengl32", "glfw3" }
+		filter { "system:macosx" }
+			libdirs { "/usr/local/lib" }
+			links { "glfw" }
+			linkoptions { "-framework OpenGL" }
 end
 
 -- null_example (no rendering)
