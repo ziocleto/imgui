@@ -1,4 +1,5 @@
 ## Visual Studio files
+build/*
 Debug/*
 Release/*
 ipch/*
