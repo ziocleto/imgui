@@ -17,10 +17,13 @@ if _ACTION == nil then
 	print "  premake5 vs2015 --with-sdl --with-vulkan"
 	print "  premake5 xcode4 --with-glfw"
 	print "  premake5 gmake2 --with-glfw"
+	print "Generators:"
+	print "  codelite gmake gmake2 vs2008 vs2010 vs2012 vs2013 vs2015 vs2017 xcode4 etc."
 	print "Options:"
+	print "  --with-dx9       Enable dear imgui DirectX 9 example"
 	print "  --with-dx10      Enable dear imgui DirectX 10 example"
 	print "  --with-dx11      Enable dear imgui DirectX 11 example"
-	print "  --with-dx9       Enable dear imgui DirectX 9 example"
+	print "  --with-dx12      Enable dear imgui DirectX 12 example (vs2015+)"
 	print "  --with-glfw      Enable dear imgui GLFW examples"
 	print "  --with-sdl       Enable dear imgui SDL examples"
 	print "  --with-vulkan    Enable dear imgui Vulkan example"
@@ -33,20 +36,31 @@ end
 newoption { trigger = "with-dx9",    description="Enable dear imgui DirectX 9 example" }
 newoption { trigger = "with-dx10",   description="Enable dear imgui DirectX 10 example" }
 newoption { trigger = "with-dx11",   description="Enable dear imgui DirectX 11 example" }
+newoption { trigger = "with-dx12",   description="Enable dear imgui DirectX 12 example" }
 newoption { trigger = "with-glfw",   description="Enable dear imgui GLFW examples" }
 newoption { trigger = "with-sdl",    description="Enable dear imgui SDL examples" }
 newoption { trigger = "with-vulkan", description="Enable dear imgui Vulkan example" }
 
 -- Enable/detect default options under Windows
-if (os.istarget ~= nil and os.istarget("windows")) or (os.is ~= nil and os.is("windows")) then
+if _ACTION ~= nil and ((os.istarget ~= nil and os.istarget("windows")) or (os.is ~= nil and os.is("windows"))) then
+	print("( enabling --with-dx9 )");
+	print("( enabling --with-dx10 )");
+	print("( enabling --with-dx11 )");
 	_OPTIONS["with-dx9"] = 1
 	_OPTIONS["with-dx10"] = 1
 	_OPTIONS["with-dx11"] = 1
+	if _ACTION >= "vs2015" then
+		print("( enabling --with-dx12 because compiler is " .. _ACTION .. " )");
+		_OPTIONS["with-dx12"] = 1
+	end
+	print("( enabling --with-glfw because GLFW is included in the libs/ folder )");
 	_OPTIONS["with-glfw"] = 1
 	if os.getenv("SDL2_DIR") then
+		print("( enabling --with-sdl because SDL2_DIR environment variable was found )");
 		_OPTIONS["with-sdl"] = 1
 	end
 	if os.getenv("VULKAN_SDK") then
+		print("( enabling --with-vulkan because VULKAN_SDK environment variable was found )");
 		_OPTIONS["with-vulkan"] = 1
 	end
 end
@@ -89,6 +103,24 @@ workspace "imgui_examples"
 	filter { "configurations:Release" }
 		optimize "On"
 
+-- directx11_example (Win32 + DirectX 11)
+-- We have DX11 as the first project because this is what Visual Studio uses
+if (_OPTIONS["with-dx11"]) then
+	project "directx11_example"
+		kind "ConsoleApp"
+		imgui_as_src ("..", "imgui")
+		--imgui_as_lib ("..")
+		files { "directx11_example/*.cpp", "directx11_example/*.h", "README.txt" }
+		vpaths { ["sources"] = "*_example/**" }
+		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100" }
+			includedirs { "$(DXSDK_DIR)/Include" }
+		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100", "platforms:x86" }
+			libdirs { "$(DXSDK_DIR)/Lib/x86" }
+		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100", "platforms:x86_64" }
+			libdirs { "$(DXSDK_DIR)/Lib/x64" }
+		filter { "system:windows" }
+			links { "d3d11", "d3dcompiler", "dxgi" }
+end
 
 -- directx9_example (Win32 + DirectX 9)
 if (_OPTIONS["with-dx9"]) then
@@ -120,22 +152,17 @@ if (_OPTIONS["with-dx10"]) then
 			links { "d3d10", "d3dcompiler", "dxgi" }
 end
 
--- directx11_example (Win32 + DirectX 11)
-if (_OPTIONS["with-dx11"]) then
-	project "directx11_example"
+-- directx12_example (Win32 + DirectX 12)
+if (_OPTIONS["with-dx12"]) then
+	project "directx12_example"
 		kind "ConsoleApp"
+		systemversion "10.0.16299.0"
 		imgui_as_src ("..", "imgui")
 		--imgui_as_lib ("..")
-		files { "directx11_example/*.cpp", "directx11_example/*.h", "README.txt" }
+		files { "directx12_example/*.cpp", "directx12_example/*.h", "README.txt" }
 		vpaths { ["sources"] = "*_example/**" }
-		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100" }
-			includedirs { "$(DXSDK_DIR)/Include" }
-		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100", "platforms:x86" }
-			libdirs { "$(DXSDK_DIR)/Lib/x86" }
-		filter { "system:windows", "toolset:msc-v80 or msc-v90 or msc-v100", "platforms:x86_64" }
-			libdirs { "$(DXSDK_DIR)/Lib/x64" }
 		filter { "system:windows" }
-			links { "d3d11", "d3dcompiler", "dxgi" }
+			links { "d3d12", "d3dcompiler", "dxgi" }
 end
 
 -- opengl2_example (GLFW + OpenGL2)
@@ -195,7 +222,7 @@ if (true) then
 end
 
 -- sdl_opengl2_example (SDL + OpenGL2)
-if (_OPTIONS["with-sdl"] and _OPTIONS["with-opengl"]) then
+if (_OPTIONS["with-sdl"]) then
 	project "sdl_opengl2_example"
 		kind "ConsoleApp"
 		imgui_as_src ("..", "imgui")
@@ -213,7 +240,7 @@ if (_OPTIONS["with-sdl"] and _OPTIONS["with-opengl"]) then
 end
 
 -- sdl_opengl3_example (SDL + OpenGL3)
-if (_OPTIONS["with-sdl"] and _OPTIONS["with-opengl"]) then
+if (_OPTIONS["with-sdl"]) then
 	project "sdl_opengl3_example"
 		kind "ConsoleApp"
 		imgui_as_src ("..", "imgui")
