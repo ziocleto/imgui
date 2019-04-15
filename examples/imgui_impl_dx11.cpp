@@ -1,4 +1,4 @@
-// ImGui Renderer for: DirectX11
+// dear imgui: Renderer for DirectX11
 // This needs to be used along with a Platform Binding (e.g. Win32)
 
 // Implemented features:
@@ -10,6 +10,9 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2018-12-03: Misc: Added #pragma comment statement to automatically link with d3dcompiler.lib when using D3DCompile().
+//  2018-11-30: Misc: Setting up io.BackendRendererName so it can be displayed in the About Window.
+//  2018-08-01: DirectX11: Querying for IDXGIFactory instead of IDXGIFactory1 to increase compatibility.
 //  2018-07-13: DirectX11: Fixed unreleased resources in Init and Shutdown functions.
 //  2018-06-08: Misc: Extracted imgui_impl_dx11.cpp/.h away from the old combined DX11+Win32 example.
 //  2018-06-08: DirectX11: Use draw_data->DisplayPos and draw_data->DisplaySize to setup projection matrix and clipping rectangle.
@@ -24,18 +27,21 @@
 #include <stdio.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "d3dcompiler") // Automatically link with d3dcompiler.lib as we are using D3DCompile() below.
+#endif
 
 // DirectX data
 static ID3D11Device*            g_pd3dDevice = NULL;
 static ID3D11DeviceContext*     g_pd3dDeviceContext = NULL;
-static IDXGIFactory1*           g_pFactory = NULL;
+static IDXGIFactory*            g_pFactory = NULL;
 static ID3D11Buffer*            g_pVB = NULL;
 static ID3D11Buffer*            g_pIB = NULL;
-static ID3D10Blob *             g_pVertexShaderBlob = NULL;
+static ID3D10Blob*              g_pVertexShaderBlob = NULL;
 static ID3D11VertexShader*      g_pVertexShader = NULL;
 static ID3D11InputLayout*       g_pInputLayout = NULL;
 static ID3D11Buffer*            g_pVertexConstantBuffer = NULL;
-static ID3D10Blob *             g_pPixelShaderBlob = NULL;
+static ID3D10Blob*              g_pPixelShaderBlob = NULL;
 static ID3D11PixelShader*       g_pPixelShader = NULL;
 static ID3D11SamplerState*      g_pFontSampler = NULL;
 static ID3D11ShaderResourceView*g_pFontTextureView = NULL;
@@ -53,6 +59,10 @@ struct VERTEX_CONSTANT_BUFFER
 // (this used to be set in io.RenderDrawListsFn and called by ImGui::Render(), but you can now call this directly from your main loop)
 void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
 {
+    // Avoid rendering when minimized
+    if (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f)
+        return;
+
     ID3D11DeviceContext* ctx = g_pd3dDeviceContext;
 
     // Create and grow vertex/index buffers if needed
@@ -84,7 +94,7 @@ void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
             return;
     }
 
-    // Copy and convert all vertices into a single contiguous buffer
+    // Upload vertex/index data into a single contiguous GPU buffer
     D3D11_MAPPED_SUBRESOURCE vtx_resource, idx_resource;
     if (ctx->Map(g_pVB, 0, D3D11_MAP_WRITE_DISCARD, 0, &vtx_resource) != S_OK)
         return;
@@ -104,7 +114,7 @@ void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
     ctx->Unmap(g_pIB, 0);
 
     // Setup orthographic projection matrix into our constant buffer
-    // Our visible imgui space lies from draw_data->DisplayPos (top left) to draw_data->DisplayPos+data_data->DisplaySize (bottom right). 
+    // Our visible imgui space lies from draw_data->DisplayPos (top left) to draw_data->DisplayPos+data_data->DisplaySize (bottom right).
     {
         D3D11_MAPPED_SUBRESOURCE mapped_resource;
         if (ctx->Map(g_pVertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource) != S_OK)
@@ -198,7 +208,7 @@ void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
     // Render command lists
     int vtx_offset = 0;
     int idx_offset = 0;
-    ImVec2 pos = draw_data->DisplayPos;
+    ImVec2 clip_off = draw_data->DisplayPos;
     for (int n = 0; n < draw_data->CmdListsCount; n++)
     {
         const ImDrawList* cmd_list = draw_data->CmdLists[n];
@@ -213,11 +223,12 @@ void ImGui_ImplDX11_RenderDrawData(ImDrawData* draw_data)
             else
             {
                 // Apply scissor/clipping rectangle
-                const D3D11_RECT r = { (LONG)(pcmd->ClipRect.x - pos.x), (LONG)(pcmd->ClipRect.y - pos.y), (LONG)(pcmd->ClipRect.z - pos.x), (LONG)(pcmd->ClipRect.w - pos.y) };
+                const D3D11_RECT r = { (LONG)(pcmd->ClipRect.x - clip_off.x), (LONG)(pcmd->ClipRect.y - clip_off.y), (LONG)(pcmd->ClipRect.z - clip_off.x), (LONG)(pcmd->ClipRect.w - clip_off.y) };
                 ctx->RSSetScissorRects(1, &r);
 
                 // Bind texture, Draw
-                ctx->PSSetShaderResources(0, 1, (ID3D11ShaderResourceView**)&pcmd->TextureId);
+                ID3D11ShaderResourceView* texture_srv = (ID3D11ShaderResourceView*)pcmd->TextureId;
+                ctx->PSSetShaderResources(0, 1, &texture_srv);
                 ctx->DrawIndexed(pcmd->ElemCount, idx_offset, vtx_offset);
             }
             idx_offset += pcmd->ElemCount;
@@ -285,7 +296,7 @@ static void ImGui_ImplDX11_CreateFontsTexture()
     }
 
     // Store our identifier
-    io.Fonts->TexID = (void *)g_pFontTextureView;
+    io.Fonts->TexID = (ImTextureID)g_pFontTextureView;
 
     // Create texture sampler
     {
@@ -311,9 +322,9 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
         ImGui_ImplDX11_InvalidateDeviceObjects();
 
     // By using D3DCompile() from <d3dcompiler.h> / d3dcompiler.lib, we introduce a dependency to a given version of d3dcompiler_XX.dll (see D3DCOMPILER_DLL_A)
-    // If you would like to use this DX11 sample code but remove this dependency you can: 
+    // If you would like to use this DX11 sample code but remove this dependency you can:
     //  1) compile once, save the compiled shader blobs into a file or source code and pass them to CreateVertexShader()/CreatePixelShader() [preferred solution]
-    //  2) use code to detect any version of the DLL and grab a pointer to D3DCompile from the DLL. 
+    //  2) use code to detect any version of the DLL and grab a pointer to D3DCompile from the DLL.
     // See https://github.com/ocornut/imgui/pull/638 for sources and details.
 
     // Create the vertex shader
@@ -353,7 +364,7 @@ bool    ImGui_ImplDX11_CreateDeviceObjects()
             return false;
 
         // Create the input layout
-        D3D11_INPUT_ELEMENT_DESC local_layout[] = 
+        D3D11_INPUT_ELEMENT_DESC local_layout[] =
         {
             { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (size_t)(&((ImDrawVert*)0)->pos), D3D11_INPUT_PER_VERTEX_DATA, 0 },
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, (size_t)(&((ImDrawVert*)0)->uv),  D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -468,10 +479,13 @@ void    ImGui_ImplDX11_InvalidateDeviceObjects()
 
 bool    ImGui_ImplDX11_Init(ID3D11Device* device, ID3D11DeviceContext* device_context)
 {
+    ImGuiIO& io = ImGui::GetIO();
+    io.BackendRendererName = "imgui_impl_dx11";
+
     // Get factory from device
     IDXGIDevice* pDXGIDevice = NULL;
     IDXGIAdapter* pDXGIAdapter = NULL;
-    IDXGIFactory1* pFactory = NULL;
+    IDXGIFactory* pFactory = NULL;
 
     if (device->QueryInterface(IID_PPV_ARGS(&pDXGIDevice)) == S_OK)
         if (pDXGIDevice->GetParent(IID_PPV_ARGS(&pDXGIAdapter)) == S_OK)
